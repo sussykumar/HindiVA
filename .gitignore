@@ -1,0 +1,10 @@
+# Virtual Environments
+voice_env/
+__pycache__/
+
+# Massive AI Models (Do not upload to GitHub)
+model/
+piper/
+
+# OS Files
+.DS_Store
