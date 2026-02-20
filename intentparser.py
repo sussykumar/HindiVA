@@ -1,9 +1,24 @@
+import os
 import re
 from rapidfuzz import process, fuzz
 
 # ==========================================
+# LOCAL AI ENGINE INITIALIZATION (SARVAM-1)
+# ==========================================
+try:
+    from llama_cpp import Llama
+    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+    MODEL_PATH = os.path.join(BASE_DIR, "llm_model", "sarvam.gguf")
+    print("🚀 [BRAIN] Booting Sarvam-1 Neural Engine...")
+    # n_ctx=512 limits RAM usage so the Raspberry Pi 4 doesn't crash
+    llm = Llama(model_path=MODEL_PATH, n_ctx=512, n_threads=4, verbose=False)
+    print("✅ [BRAIN] Sarvam-1 Loaded Successfully!\n")
+except Exception as e:
+    print(f"⚠️ [BRAIN WARNING]: Could not load Sarvam AI ({e}). Running in Regex-only mode.\n")
+    llm = None
+
+# ==========================================
 # TIER 0: THE TITANIUM DEVANAGARI TAXONOMY
-# Synthesized from native Hindi and Hinglish NLU datasets
 # ==========================================
 COMMAND_REGISTRY = {
     # --- Home Automation ---
@@ -88,32 +103,49 @@ COMMAND_REGISTRY = {
 }
 
 # ==========================================
-# TIER 1: TEXT NORMALIZATION
+# UTILITY FUNCTIONS
 # ==========================================
 def normalize_text(text):
-    """Removes punctuation and normalizes Hindi text for cleaner fuzzy matching."""
     text = re.sub(r'[^\w\s\u0900-\u097F]', '', text)
     return text.lower().strip()
 
-# ==========================================
-# TIER 2: THE MULTI-INTENT SLICER
-# ==========================================
 def split_commands(text):
-    """
-    Slices a continuous sentence into multiple isolated commands.
-    It hunts for Hindi conjunctions like 'और' (and), 'तथा', or 'फिर'.
-    """
     parts = re.split(r'\s+(और|तथा|फिर|and)\s+', text)
     commands = [p.strip() for p in parts if p.strip() not in ['और', 'तथा', 'फिर', 'and'] and p.strip()]
     return commands
 
 # ==========================================
-# TIER 3: THE FUZZY ENGINE
+# THE LLM FALLBACK PARSER
+# ==========================================
+def llm_intent_parser(phrase):
+    """Forces Sarvam-1 to act strictly as a fallback intent classifier."""
+    if not llm: return "UNKNOWN_COMMAND"
+    print(f"   [SARVAM-1] Analyzing heavy slang: '{phrase}'...")
+    
+    # Join all valid commands dynamically so the AI knows its options
+    valid_commands_str = ", ".join(COMMAND_REGISTRY.keys())
+    
+    prompt = f"""You are the central intelligence of an offline smart home system. 
+Classify the following Hindi/Hinglish user phrase into EXACTLY ONE of these hardware commands: 
+[{valid_commands_str}, UNKNOWN_COMMAND]
+
+Phrase: {phrase}
+Command:"""
+    
+    output = llm(prompt, max_tokens=15, stop=["\n", "Phrase:"], echo=False)
+    result = output['choices'][0]['text'].strip().upper()
+    
+    for cmd in COMMAND_REGISTRY.keys():
+        if cmd in result:
+            print(f"   [SARVAM-1] Successfully mapped to -> {cmd}")
+            return cmd
+            
+    return "UNKNOWN_COMMAND"
+
+# ==========================================
+# THE HYBRID ENGINE (FUZZY + AI)
 # ==========================================
 def parse_multiple_intents(text):
-    """
-    Takes the sliced commands and maps each one to its correct intent with RapidFuzz.
-    """
     normalized_text = normalize_text(text)
     command_phrases = split_commands(normalized_text)
     
@@ -123,6 +155,7 @@ def parse_multiple_intents(text):
         best_match = None
         highest_score = 0
         
+        # 1. Try RapidFuzz First (Fast & Lightweight)
         for intent, phrases in COMMAND_REGISTRY.items():
             match = process.extractOne(phrase, phrases, scorer=fuzz.token_set_ratio)
             if match:
@@ -134,21 +167,19 @@ def parse_multiple_intents(text):
         if highest_score >= 60:  
             results.append({"intent": best_match, "confidence": round(highest_score, 2), "phrase": phrase})
         else:
-            results.append({"intent": "UNKNOWN_COMMAND", "confidence": round(highest_score, 2), "phrase": phrase})
+            # 2. Trigger AI Fallback (If RapidFuzz is confused)
+            llm_intent = llm_intent_parser(phrase)
+            if llm_intent != "UNKNOWN_COMMAND":
+                results.append({"intent": llm_intent, "confidence": 99.9, "phrase": phrase})
+            else:
+                results.append({"intent": "UNKNOWN_COMMAND", "confidence": round(highest_score, 2), "phrase": phrase})
             
     return results
 
-# ==========================================
-# LOCAL TESTING BLOCK
-# ==========================================
 if __name__ == "__main__":
-    print("🧠 Advanced Multi-Intent Parser Initialized.\n")
-    
-    test_query = "कल मीटिंग याद दिलाना और पंखा बंद कर दो"
-    print(f"🗣️ Input: '{test_query}'")
-    
+    test_query = "यहाँ सांस घुट रही है कुछ चालू कर और कल का अलार्म लगाओ"
+    print(f"\n🗣️ Input: '{test_query}'")
     result = parse_multiple_intents(test_query)
-    
     print("\n✅ Extracted Intents:")
     for res in result:
         print(f" - Command: '{res['phrase']}' -> Intent: {res['intent']} (Confidence: {res['confidence']}%)")

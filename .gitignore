@@ -1,10 +1,13 @@
-# Virtual Environments
+# Ignore heavy AI models and acoustic files
+llm_model/
+model/
+*.gguf
+*.onnx
+
+# Ignore Python virtual environments and caches
 voice_env/
 __pycache__/
+*.pyc
 
-# Massive AI Models (Do not upload to GitHub)
-model/
-piper/
-
-# OS Files
-.DS_Store
+# Ignore local databases
+memory.json
